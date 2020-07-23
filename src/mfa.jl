@@ -1,9 +1,10 @@
 "Mixture of Factor Analyzers"
 function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
-             m::Integer = 2,        # the number of factor analyzers to use
-             k::Integer = 1,        # the number of factors in each analyzer
-             tol::Real=1.0e-6,      # convergence tolerance
-             maxiter::Integer=1000  # number of iterations
+                m::Integer = 2,        # the number of factor analyzers to use
+                k::Integer = 1,        # the number of factors in each analyzer
+                tol::Real=1.0e-6,      # convergence tolerance
+                maxiter::Integer=1000, # number of iterations
+                μs::Union{AbstractMatrix{T}, Nothing} = nothing
             ) where T<:Real
 
     d, n = size(X)
@@ -18,7 +19,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
     μⱼ = zeros(T,d,m)
     for j in 1:m
         Wⱼ[:,:,j] = randn(d,k) * sqrt(sc/k)
-        μⱼ[:,j] =  (randn(d)' * sqrt(cX))' + mX # zeros(d)
+        μⱼ[:,j] = μs !== nothing ? μs[:,j] : (randn(d)' * sqrt(cX))' + mX # zeros(d)
     end
     Ψⱼ = hcat(fill(diag(cX) .+ eps(), m)...) #fill(0.01, d, m)
     hᵢⱼ = zeros(T,m,n)
@@ -37,7 +38,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
             # Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*V⁻¹*WᵀΨ⁻¹
             Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
             detΣ⁻¹ = sqrt(det(Σ⁻¹))
-            @debug "$j: |Σ⁻¹|" detΣ⁻¹
+            # @debug "$j: |Σ⁻¹|" detΣ⁻¹
             Y = X .- view(μⱼ,:,j)
             Σ⁻¹Y = Σ⁻¹*Y
             hᵢⱼ[j, :] = πⱼ[j]*(CMVN*detΣ⁻¹).*exp.(-0.5.*sum(Y.*Σ⁻¹Y, dims=1))
