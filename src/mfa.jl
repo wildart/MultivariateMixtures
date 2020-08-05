@@ -4,7 +4,8 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
                 k::Integer = 1,        # the number of factors in each analyzer
                 tol::Real=1.0e-6,      # convergence tolerance
                 maxiter::Integer=1000, # number of iterations
-                μs::Union{AbstractMatrix{T}, Nothing} = nothing
+                μs::Union{AbstractMatrix{T}, Nothing} = nothing,
+                Σs::Union{AbstractArray{T,3}, Nothing} = nothing
             ) where T<:Real
 
     d, n = size(X)
@@ -17,33 +18,47 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
     πⱼ = fill(one(T)/m, m)
     Wⱼ = zeros(T,d,k,m)
     μⱼ = zeros(T,d,m)
+    Ψⱼ = zeros(T,k,m)
     for j in 1:m
-        Wⱼ[:,:,j] = randn(d,k) * sqrt(sc/k)
-        μⱼ[:,j] = μs !== nothing ? μs[:,j] : (randn(d)' * sqrt(cX))' + mX # zeros(d)
+        Wⱼ[:,:,j] = Σs !== nothing ? Σs[:,:,j] : randn(d,k) * sqrt(sc/k)
+        μⱼ[:,j] = μs !== nothing ? μs[:,j] : (randn(d)' * sqrt(cX))' + mX
+        Ψⱼ[:,j] = diag(Σs !== nothing ? Σs[:,:,j] : cX) .+ eps()
     end
-    Ψⱼ = hcat(fill(diag(cX) .+ eps(), m)...) #fill(0.01, d, m)
+
     hᵢⱼ = zeros(T,m,n)
-    E₍zₗxᵢωⱼ₎ = zeros(T,k,n,m)
+    πᵢⱼ = similar(hᵢⱼ)
     E₍zzᵀₗxᵢωⱼ₎ = zeros(T,k,k,m)
+    Σ⁻¹ⱼ = zeros(T,d,d,m)
+    ZIᵀ=zeros(T,n,k+1,m)
+    ZIᵀ[:,end,:] .= one(T)
+    Σ⁻¹Y = similar(X)
+    Y = similar(X)
+
+    E₍zₗxᵢωⱼ₎ = view(ZIᵀ,:,1:k,:)
 
     L_old = 0.0
     for itr in 1:maxiter
         # E Step
         # 1) Calculate hᵢⱼ, E₍zₗxᵢωⱼ₎
         for j in 1:m
-            Ψ⁻¹ = diagm(0 => 1 ./ Ψⱼ[:, j])
-            W = Wⱼ[:,:,j]
-            WᵀΨ⁻¹ = W'*Ψ⁻¹
+            Ψ⁻¹ = Diagonal(1 ./ Ψⱼ[:, j])
+            W = @view Wⱼ[:,:,j]
+            Σ⁻¹ = @view Σ⁻¹ⱼ[:,:,j]
             # V⁻¹ = inv(I + WᵀΨ⁻¹*W)
+            WᵀΨ⁻¹ = W'*Ψ⁻¹
             # Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*V⁻¹*WᵀΨ⁻¹
-            Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
+            Σ⁻¹ .= Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
             detΣ⁻¹ = sqrt(det(Σ⁻¹))
-            # @debug "$j: |Σ⁻¹|" detΣ⁻¹
-            Y = X .- view(μⱼ,:,j)
-            Σ⁻¹Y = Σ⁻¹*Y
-            hᵢⱼ[j, :] = πⱼ[j]*(CMVN*detΣ⁻¹).*exp.(-0.5.*sum(Y.*Σ⁻¹Y, dims=1))
+            # Y = X .- view(μⱼ,:,j)
+            broadcast!(-,Y,X,view(μⱼ,:,j))
+            Σ⁻¹Y .= Σ⁻¹*Y
+            # view(hᵢⱼ,j,:) .= πⱼ[j]*(CMVN*detΣ⁻¹).*exp.(-0.5.*vec(sum(Y.*Σ⁻¹Y, dims=1)))
+            broadcast!(*,Y,Y,Σ⁻¹Y)
+            sum!(view(hᵢⱼ,j,:)', Y)
+            c = πⱼ[j]*(CMVN*detΣ⁻¹)
+            broadcast!(e->c*exp(-0.5*e),view(hᵢⱼ,j,:),view(hᵢⱼ,j,:))
             # Ez[:,:,j] = V⁻¹*WᵀΨ⁻¹*Y # W'*Σ⁻¹*Y
-            E₍zₗxᵢωⱼ₎[:,:,j] = W'Σ⁻¹Y
+            view(E₍zₗxᵢωⱼ₎,:,:,j) .= (W'Σ⁻¹Y)'
         end
 
         # 2) Calculate log(L)
@@ -65,35 +80,35 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
         L_old = L
 
         # 3) Calculate πⱼ
-        πᵢⱼ = hᵢⱼ./hᵢ
-        πⱼ = sum(πᵢⱼ, dims=2)
+        # πᵢⱼ = hᵢⱼ./hᵢ
+        broadcast!(/,πᵢⱼ,hᵢⱼ,hᵢ)
+        πⱼ .= sum(πᵢⱼ, dims=2) |> vec
 
         # 4) Calculate E₍zzᵀₗxᵢωⱼ₎
         for j in 1:m
-            Ψ⁻¹ = diagm(0 => 1 ./ Ψⱼ[:, j])
-            W = Wⱼ[:,:,j]
-            WᵀΨ⁻¹ = W'*Ψ⁻¹
-            Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
-            Y = X .- view(μⱼ,:,j)
+            W = @view Wⱼ[:,:,j]
+            Σ⁻¹ = @view Σ⁻¹ⱼ[:,:,j]
+            broadcast!(-,Y,X,view(μⱼ,:,j))
             βⱼ = W'*Σ⁻¹
-            Sᵢ = (πᵢⱼ[j, :]'.*Y)*Y'/πⱼ[j]
-            E₍zzᵀₗxᵢωⱼ₎[:,:,j] = I - βⱼ*W + βⱼ*Sᵢ*transpose(βⱼ)
+            Sᵢ = (view(πᵢⱼ, j, :)'.*Y)*Y'./πⱼ[j]
+            view(E₍zzᵀₗxᵢωⱼ₎,:,:,j) .= I - βⱼ*W + βⱼ*Sᵢ*transpose(βⱼ)
         end
 
         # M Step
         for j in 1:m
-            ZIᵀ = hcat(E₍zₗxᵢωⱼ₎[:,:,j]', ones(n))
-            QWnum = πᵢⱼ[j, :]'.*X*ZIᵀ
-            QWden1 = πⱼ[j]*E₍zzᵀₗxᵢωⱼ₎[:,:,j]
-            QWden23 = E₍zₗxᵢωⱼ₎[:,:,j]*πᵢⱼ[j, :]
+            πᵢ = @view πᵢⱼ[j, :]
+            broadcast!(*,Y,πᵢ',X) # πᵢ'.*X
+            QWnum = Y*view(ZIᵀ,:,:,j)
+            QWden1 = πⱼ[j]*view(E₍zzᵀₗxᵢωⱼ₎,:,:,j)
+            QWden23 = view(E₍zₗxᵢωⱼ₎,:,:,j)'*πᵢ
             QWden = [QWden1 QWden23; QWden23' πⱼ[j]]
             R = QWnum/QWden
 
-            Wⱼ[:,:,j] = R[:,1:end-1]
-            μⱼ[:,j] = R[:,end]
+            Wⱼ[:,:,j] .= R[:,1:end-1]
+            μⱼ[:,j] .= R[:,end]
 
-            Ψⱼ[:,j] = diag((πᵢⱼ[j, :]'.*X)*X' - R*QWnum')/πⱼ[j]
+            Ψⱼ[:,j] .= diag(Y*X' - R*QWnum')./πⱼ[j]
         end
     end
-    return MixtureModel([FactorAnalysis(μⱼ[:,j], Wⱼ[:,:,j], Ψⱼ[:,j]) for j in 1:m], vec(πⱼ/n))
+    return MixtureModel([FactorAnalysis(μⱼ[:,j], Wⱼ[:,:,j], Ψⱼ[:,j]) for j in 1:m], πⱼ./n)
 end
