@@ -18,10 +18,16 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
     πⱼ = fill(one(T)/m, m)
     Wⱼ = zeros(T,d,k,m)
     μⱼ = zeros(T,d,m)
-    Ψⱼ = zeros(T,k,m)
+    Ψⱼ = zeros(T,d,m)
+    rn = 1:min(d,k)
     for j in 1:m
-        Wⱼ[:,:,j] = Σs !== nothing ? Σs[:,:,j] : randn(d,k) * sqrt(sc/k)
-        μⱼ[:,j] = μs !== nothing ? μs[:,j] : (randn(d)' * sqrt(cX))' + mX
+        if Σs !== nothing
+            ev = eigvecs(Σs[:,:,j], sortby=-)
+            Wⱼ[:,rn,j] = ev[:,rn].*sqrt(det(Σs[:,:,j])^(1/d))
+        else
+            Wⱼ[:,:,j] = randn(d,k) * sqrt(sc/k)
+        end
+        μⱼ[:,j] = μs !== nothing ? μs[:,j] : (vec(randn(d)' * sqrt(cX)) .+ mX)
         Ψⱼ[:,j] = diag(Σs !== nothing ? Σs[:,:,j] : cX) .+ eps()
     end
 
@@ -47,7 +53,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
             # V⁻¹ = inv(I + WᵀΨ⁻¹*W)
             WᵀΨ⁻¹ = W'*Ψ⁻¹
             # Σ⁻¹ = Ψ⁻¹ - Ψ⁻¹*W*V⁻¹*WᵀΨ⁻¹
-            Σ⁻¹ .= Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
+            Σ⁻¹[:] = Ψ⁻¹ - Ψ⁻¹*W*inv(I + WᵀΨ⁻¹*W)*WᵀΨ⁻¹
             detΣ⁻¹ = sqrt(det(Σ⁻¹))
             # Y = X .- view(μⱼ,:,j)
             broadcast!(-,Y,X,view(μⱼ,:,j))
@@ -66,23 +72,23 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
         hᵢ = sum(hᵢⱼ, dims=1)
         L = sum(log.(hᵢ))
 
+        # 3) Calculate πⱼ
+        # πᵢⱼ = hᵢⱼ./hᵢ
+        broadcast!(/,πᵢⱼ,hᵢⱼ,hᵢ)
+        πⱼ .= sum(πᵢⱼ, dims=2) |> vec
+
         # Check exit conditions
         if itr > 1
             chg = L - L_old
             if chg < 0
                 @warn "log likelihood decreased" itr=itr change=chg
             end
-            @debug "log(L)=$L" itr=itr increment=chg hᵢ=hᵢ Ψⱼ=vec(Ψⱼ)
+            @debug "log(L)=$L" itr=itr increment=chg πⱼ=πⱼ' # Ψⱼ=Ψⱼ
             if (chg < tol)
                 break
             end
         end
         L_old = L
-
-        # 3) Calculate πⱼ
-        # πᵢⱼ = hᵢⱼ./hᵢ
-        broadcast!(/,πᵢⱼ,hᵢⱼ,hᵢ)
-        πⱼ .= sum(πᵢⱼ, dims=2) |> vec
 
         # 4) Calculate E₍zzᵀₗxᵢωⱼ₎
         for j in 1:m
