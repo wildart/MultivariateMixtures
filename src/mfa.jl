@@ -1,52 +1,53 @@
 "Mixture of Factor Analyzers"
-function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
-                m::Integer = 2,        # the number of factor analyzers to use
-                k::Integer = 1,        # the number of factors in each analyzer
+function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T},
+                k::Integer = 2;        # the number of factor analyzers to use
+                factors::Integer = 1,        # the number of factors in each analyzer
                 tol::Real=1.0e-6,      # convergence tolerance
                 maxiter::Integer=1000, # number of iterations
                 μs::Union{AbstractMatrix{T}, Nothing} = nothing,
                 Σs::Union{AbstractArray{T,3}, Nothing} = nothing
-            ) where T<:Real
+            ) where {T<:AbstractFloat}
 
     d, n = size(X)
     CMVN = (2π)^(-d/2)
     mX=mean(X, dims=2)
     cX=cov(X, dims=2)
     sc=det(cX)^(1/d)
+    l = factors
 
     # initialize parameters
-    πⱼ = fill(one(T)/m, m)
-    Wⱼ = zeros(T,d,k,m)
-    μⱼ = zeros(T,d,m)
-    Ψⱼ = zeros(T,d,m)
-    rn = 1:min(d,k)
-    for j in 1:m
+    πⱼ = fill(one(T)/k, k)
+    Wⱼ = zeros(T,d,l,k)
+    μⱼ = zeros(T,d,k)
+    Ψⱼ = zeros(T,d,k)
+    rn = 1:min(d,l)
+    for j in 1:k
         if Σs !== nothing
             ev = eigvecs(Σs[:,:,j], sortby=-)
             Wⱼ[:,rn,j] = ev[:,rn].*sqrt(det(Σs[:,:,j])^(1/d))
         else
-            Wⱼ[:,:,j] = randn(d,k) * sqrt(sc/k)
+            Wⱼ[:,:,j] = randn(d,l) * sqrt(sc/l)
         end
         μⱼ[:,j] = μs !== nothing ? μs[:,j] : (vec(randn(d)' * sqrt(cX)) .+ mX)
         Ψⱼ[:,j] = diag(Σs !== nothing ? Σs[:,:,j] : cX) .+ eps()
     end
 
-    hᵢⱼ = zeros(T,m,n)
+    hᵢⱼ = zeros(T,k,n)
     πᵢⱼ = similar(hᵢⱼ)
-    E₍zzᵀₗxᵢωⱼ₎ = zeros(T,k,k,m)
-    Σ⁻¹ⱼ = zeros(T,d,d,m)
-    ZIᵀ=zeros(T,n,k+1,m)
+    E₍zzᵀₗxᵢωⱼ₎ = zeros(T,l,l,k)
+    Σ⁻¹ⱼ = zeros(T,d,d,k)
+    ZIᵀ=zeros(T,n,l+1,k)
     ZIᵀ[:,end,:] .= one(T)
     Σ⁻¹Y = similar(X)
     Y = similar(X)
 
-    E₍zₗxᵢωⱼ₎ = view(ZIᵀ,:,1:k,:)
+    E₍zₗxᵢωⱼ₎ = view(ZIᵀ,:,1:l,:)
 
     L_old = 0.0
     for itr in 1:maxiter
         # E Step
         # 1) Calculate hᵢⱼ, E₍zₗxᵢωⱼ₎
-        for j in 1:m
+        for j in 1:k
             Ψ⁻¹ = Diagonal(1 ./ Ψⱼ[:, j])
             W = @view Wⱼ[:,:,j]
             Σ⁻¹ = @view Σ⁻¹ⱼ[:,:,j]
@@ -91,7 +92,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
         L_old = L
 
         # 4) Calculate E₍zzᵀₗxᵢωⱼ₎
-        for j in 1:m
+        for j in 1:k
             W = @view Wⱼ[:,:,j]
             Σ⁻¹ = @view Σ⁻¹ⱼ[:,:,j]
             broadcast!(-,Y,X,view(μⱼ,:,j))
@@ -101,7 +102,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
         end
 
         # M Step
-        for j in 1:m
+        for j in 1:k
             πᵢ = @view πᵢⱼ[j, :]
             broadcast!(*,Y,πᵢ',X) # πᵢ'.*X
             QWnum = Y*view(ZIᵀ,:,:,j)
@@ -116,5 +117,5 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T};
             Ψⱼ[:,j] .= diag(Y*X' - R*QWnum')./πⱼ[j]
         end
     end
-    return MixtureModel([FactorAnalysis(μⱼ[:,j], Wⱼ[:,:,j], Ψⱼ[:,j]) for j in 1:m], πⱼ./n)
+    return FinateMixtureModel([FactorAnalysis(μⱼ[:,j], Wⱼ[:,:,j], Ψⱼ[:,j]) for j in 1:k], πⱼ./n)
 end
