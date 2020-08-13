@@ -1,23 +1,10 @@
-abstract type AbstractEMState{T<:AbstractFloat} end
-
-struct HeteroscedasticGMMState{T<:AbstractFloat} <: AbstractEMState{T}
-    πₖ::AbstractArray{T,1}
-    μₖ::AbstractArray{T,2}
-    Σₖ::AbstractArray{T,3}
-end
-
-struct HomoscedasticGMMState{T<:AbstractFloat} <: AbstractEMState{T}
-    πₖ::AbstractArray{T,1}
-    μₖ::AbstractArray{T,2}
-    Σₖ::AbstractArray{T,2}
-end
-
 "Gaussian Mixture Model"
 function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
                 tol::Real=1.0e-6,      # convergence tolerance
                 maxiter::Integer=1000, # number of iterations
                 μs::Union{AbstractArray{T,2}, Nothing} = nothing,
-                Σs::Union{AbstractArray{T,3}, Nothing} = nothing
+                Σs::Union{AbstractArray{T,3}, Nothing} = nothing,
+                homoscedastic=false
             ) where {T<:AbstractFloat, MV<:MultivariateNormal}
 
     d, n = size(X)
@@ -27,6 +14,7 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
     πₖ = zeros(T, k)
     μₖ = zeros(T, d, k)
     Σₖ = zeros(T, d, d, k)
+    Σ  = zeros(T, d, d)
 
     # initialize parameters
     mX = mean(X, dims=2)
@@ -56,12 +44,12 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
         ℒ = sum(log.(Rₙ))
         Δℒ = abs(ℒ′ - ℒ)
         @debug "Likelihood" itr=itr ℒ=ℒ Δℒ=Δℒ
-        Δℒ < tol && break
+        (Δℒ < tol || isnan(Δℒ)) && break
         ℒ′ = ℒ
 
         Rₙₖ ./= Rₙ       # τₙₖ
         # precompute: πₖ = T1 = ∑ₙ(Rₙₖ)/Rₙ
-        sum!(πₖ', Rₙₖ)   # τₖ = T1
+        sum!(πₖ', Rₙₖ)
 
         # precompute: E[ωₖz|x] = E[ωₖ|x] E[z|ωₖ,x] = μₖ = T2 = ∑ₙ(Rₙₖ⋅x)
         for j in 1:k
@@ -87,6 +75,18 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
             μⱼ ./= πₖ[j]
             # πₖ = (∑ₙ Rₙₖ)/n = ∑ₙ (Rₙₖ/Rₙ)
             πₖ[j] /= n
+        end
+
+        if homoscedastic
+            Σₖ[:,:,1] .*= πₖ[1]
+            for j in 2:k
+                Σⱼ = view(Σₖ,:,:,j)
+                Σⱼ .*= πₖ[j]
+                Σₖ[:,:,1] .+= Σⱼ
+            end
+            for j in 2:k
+                Σₖ[:,:,j] .= copy(Σₖ[:,:,1])
+            end
         end
     end
 
