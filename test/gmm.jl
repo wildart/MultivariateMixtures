@@ -9,7 +9,7 @@
 
     G1 = fit_mle(MvNormal, X[:,1:250])
     GMM = fit_mm(FullNormal, X, k, tol=1e-5)
-    @test Distributions.component_type(GMM) <: MvNormal
+    @test Distributions.component_type(GMM) <: FullNormal
     @test ncomponents(GMM) == k
     @test probs(GMM) ≈ fill(1/4, k) atol=1e-2
     G2 = component(GMM,2)
@@ -24,6 +24,13 @@
     G3 = component(GMM,4)
     @test mean(G1) ≈ mean(G3) atol=1e-2
     @test cov(G1) ≈ cov(G3) atol=0.5
+    @test cov(G3) == cov(component(GMM,1))
+
+    GMM = fit_mm(DiagNormal, X, k, tol=1e-4)
+    @test Distributions.component_type(GMM) <: DiagNormal
+
+    GMM = fit_mm(IsoNormal, X, k, tol=1e-4)
+    @test Distributions.component_type(GMM) <: IsoNormal
 
     X = hcat([MultivariateMixtures.clusters(t, 250, 5) for t in theta]...)
     GMM = fit_mm(FullNormal, X, k, tol=1e-3)

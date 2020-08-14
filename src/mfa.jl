@@ -120,5 +120,5 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T},
     return FinateMixtureModel([FactorAnalysis(μⱼ[:,j], Wⱼ[:,:,j], Ψⱼ[:,j]) for j in 1:k], πⱼ./n)
 end
 
-fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T}; m=2, k=1, kwargs...) =
+fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T}; m=2, k=1, kwargs...) where {T<:AbstractFloat} =
     fit_mm(FactorAnalysis, X, m; factors=k, kwargs...)

@@ -19,9 +19,8 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
     # initialize parameters
     mX = mean(X, dims=2)
     cX=cov(X, dims=2)
-    sc=det(cX)^(1/d)
     for j in 1:k
-        Σₖ[:,:,j] .= cX #.+rand(T,d,d) * sqrt(sc)
+        init_covariance!(MV, view(Σₖ,:,:,j), cX)
         μₖ[:,j] .= vec(sqrt(cX)'*randn(T, d) .+ mX)
         πₖ[j] = one(T)/n
     end
@@ -75,6 +74,8 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
             μⱼ ./= πₖ[j]
             # πₖ = (∑ₙ Rₙₖ)/n = ∑ₙ (Rₙₖ/Rₙ)
             πₖ[j] /= n
+            # put restriction on the covariance matrix
+            restrict_covariance!(MV, Σⱼ)
         end
 
         if homoscedastic
@@ -94,5 +95,52 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
         @warn "No convergence" Δℒ=Δℒ tol=tol
     end
 
-    return MixtureModel([MvNormal(μₖ[:,j], Symmetric(Σₖ[:,:,j])) for j in 1:k], πₖ)
+    return MixtureModel([distribution(MV, μₖ[:,j], Σₖ[:,:,j]) for j in 1:k], πₖ)
 end
+
+function init_covariance!(::Type{FullNormal}, Σₖ::AbstractMatrix, Σ::AbstractMatrix)
+    # d = size(Σₖ,1)
+    # sc=det(Σ)^(1/d)
+    Σₖ .= Σ #.+rand(T,d,d) * sqrt(sc)
+end
+
+function init_covariance!(::Type{DiagNormal}, Σₖ::AbstractMatrix, Σ::AbstractMatrix)
+    for i in 1:size(Σₖ,1)
+        Σₖ[i,i] = Σ[i,i]
+    end
+end
+
+function init_covariance!(::Type{IsoNormal}, Σₖ::AbstractMatrix, Σ::AbstractMatrix)
+    d = size(Σₖ,1)
+    σ = det(Σ)^(1/d)
+    for i in 1:d
+        Σₖ[i,i] = σ
+    end
+end
+
+restrict_covariance!(::Type{FullNormal}, Σₖ::AbstractMatrix) = ()
+
+function restrict_covariance!(::Type{DiagNormal}, Σₖ::AbstractMatrix)
+    d = size(Σₖ,1)
+    for i in 1:d, j in 1:d
+        if i != j
+            Σₖ[i,j] = 0
+        end
+    end
+end
+
+function restrict_covariance!(::Type{IsoNormal}, Σₖ::AbstractMatrix)
+    d = size(Σₖ,1)
+    σ = det(Σₖ)^(1/d)
+    for i in 1:d, j in 1:d
+        if i != j
+            Σₖ[i,j] = 0
+        else
+            Σₖ[i,j] = σ
+        end
+    end
+end
+
+distribution(::Type{FullNormal}, μₖ::AbstractVector, Σₖ::AbstractMatrix) = MvNormal(μₖ, Symmetric(Σₖ))
+distribution(::Type{DiagNormal}, μₖ::AbstractVector, Σₖ::AbstractMatrix) = MvNormal(μₖ, diag(Σₖ))
+distribution(::Type{IsoNormal}, μₖ::AbstractVector, Σₖ::AbstractMatrix) = MvNormal(μₖ, Σₖ[1,1])
