@@ -85,7 +85,7 @@ function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T},
                 @warn "log likelihood decreased" itr=itr change=chg
             end
             @debug "log(L)=$L" itr=itr increment=chg πⱼ=πⱼ' # Ψⱼ=Ψⱼ
-            if (chg < tol)
+            if (abs(chg) < tol)
                 break
             end
         end
