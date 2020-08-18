@@ -1,6 +1,6 @@
 "Mixture of Factor Analyzers"
 function fit_mm(::Type{FactorAnalysis}, X::AbstractMatrix{T},
-                k::Integer = 2;        # the number of factor analyzers to use
+                k::Integer;            # the number of factor analyzers to use
                 factors::Integer = 1,  # the number of factors in each analyzer
                 tol::Real=1.0e-6,      # convergence tolerance
                 maxiter::Integer=1000, # number of iterations

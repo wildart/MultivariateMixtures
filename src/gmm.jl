@@ -1,5 +1,5 @@
 "Gaussian Mixture Model"
-function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int = 2;
+function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
                 tol::Real=1.0e-6,      # convergence tolerance
                 maxiter::Integer=1000, # number of iterations
                 μs::Union{AbstractArray{T,2}, Nothing} = nothing,

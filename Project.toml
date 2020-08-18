@@ -4,7 +4,7 @@ keywords = ["multivariate statistics", "mixtures"]
 license = "MIT"
 desc = "A Julia package for multivariate mixture models"
 repository = "https://github.com/wildart/MultivariateMixtures.jl.git"
-version = "0.2.0"
+version = "0.2.1"
 
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
