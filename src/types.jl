@@ -35,6 +35,7 @@ ncomponents(d::FinateMixtureModel) = length(d.components)
 components(d::FinateMixtureModel) = d.components
 component(d::FinateMixtureModel, k::Int) = d.components[k]
 probs(d::FinateMixtureModel) = probs(d.prior)
+length(d::FinateMixtureModel) = length(d.components[1])
 
 function mean(d::FinateMixtureModel)
     K = ncomponents(d)
