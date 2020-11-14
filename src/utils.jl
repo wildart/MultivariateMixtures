@@ -11,29 +11,38 @@ function colwise_dot!(r::AbstractArray, a::AbstractMatrix, b::AbstractMatrix)
     return r
 end
 
-function posterior!(r, α, Σ⁻¹, Z)
+function posterior!(r, α, Σ, Z)
     d = size(Z, 1)
-    c = α*(2π)^(-d/2)*sqrt(det(Σ⁻¹))
-    colwise_dot!(r, Z, Σ⁻¹ * Z)
+    c = α/(2π)^(d/2)*sqrt(det(Σ))
+    colwise_dot!(r, Z, inv(Σ) * Z)
     broadcast!(e->c*exp(-e/2), r, r)
 end
 
 "Calculate responsibilities (or posterior probability)"
-function logpost!(r, α, Σ⁻¹::AbstractMatrix{T}, Z::AbstractMatrix{T}) where {T <: AbstractFloat}
+
+function logpost!(r, α, L::LowerTriangular{T}, Z::AbstractMatrix{T}) where {T <: AbstractFloat}
     d = size(Z, 1)
-    colwise_dot!(r, Z, Σ⁻¹ * Z)
+    MultivariateMixtures.colwise_dot!(r, Z, L \ Z)
     r ./= -2
-    r .+= log(α)+log(2π)*(-d/2)+log(sqrt(det(Σ⁻¹)))
+    r .+= -(log(2π)*d + logdet(L))/2 + log(α)
 end
 
-function logpost!(r, α, Ch::Cholesky, Z::AbstractMatrix{T}) where {T <: AbstractFloat}
+function logpost!(r, α, Σ::Symmetric{T}, Z::AbstractMatrix{T}) where {T <: AbstractFloat}
     d = size(Z, 1)
-    logdetL⁻¹ = sum(log.(1 ./ diag(Ch.U)))
+    MultivariateMixtures.colwise_dot!(r, Z, inv(Σ) * Z)
+    r ./= -2
+    r .+= -(log(2π)*d + logdet(Σ))/2 + log(α)
+end
+
+function logpost!(r, α, Ch::Factorization{T}, Z::AbstractMatrix{T}) where {T <: AbstractFloat}
+    # define aux vars
+    d = size(Z, 1)
     tmp = similar(Z)
+    # r .= Z.*(inv(Ch)*Z)
     ldiv!(tmp, Ch, Z)
     sum!(r', broadcast!(*, tmp, Z, tmp))
     r ./= -2
-    r .+= log(α)+log(2π)*(-d/2)+logdetL⁻¹
+    r .+= -(log(2π)*d + logdet(Ch))/2 + log(α)
 end
 
 """
@@ -116,7 +125,7 @@ function initialize_kmeans(X::AbstractMatrix{T}, k::Int) where {T <: AbstractFlo
     d, n = size(X)
     C = kmeans(X, k)
     A = assignments(C)
-    [A[i] == j ? 1.0 : 0.0 for i in 1:n, j in 1:k]
+    [A[i] == j ? one(T) : zero(T) for i in 1:n, j in 1:k]
 end
 
 function initialize_random(X::AbstractMatrix{T}, k::Int) where {T <: AbstractFloat}
@@ -126,29 +135,25 @@ function initialize_random(X::AbstractMatrix{T}, k::Int) where {T <: AbstractFlo
 end
 
 function stats(X::AbstractMatrix{T}, Rₙₖ::AbstractMatrix{T}) where {T<:AbstractFloat}
-    πₖ = sum(Rₙₖ, dims=1) .+ 10eps(T)
-    πₖ, X*Rₙₖ
+    nₖ = sum(Rₙₖ, dims=1) .+ 10eps(T)
+    nₖ, X*Rₙₖ./nₖ
 end
 
-function stats!(πₖ::AbstractVector{T}, μₖ::AbstractMatrix{T},
+function stats!(nₖ::AbstractVector{T}, μₖ::AbstractMatrix{T},
                 X::AbstractMatrix{T},  Rₙₖ::AbstractMatrix{T}) where {T<:AbstractFloat}
-    sum!(πₖ', Rₙₖ)
-    πₖ .+= 10eps(T)
+    sum!(nₖ', Rₙₖ)
+    nₖ .+= 10eps(T)
     mul!(μₖ,X,Rₙₖ)
+    μₖ ./= nₖ'
 end
 
-function cov!(::Type{FullNormal}, πₖ::AbstractVector{T}, μₖ::AbstractMatrix{T}, Σₖ::AbstractArray{T,3},
-              X::AbstractMatrix{T}, Rₙₖ::AbstractMatrix{T}) where {T<:AbstractFloat}
-    fill!(Σₖ, zero(T))
+function cov!(::Type{FullNormal}, Σₖ::AbstractArray{T,3}, nₖ::AbstractVector{T}, μₖ::AbstractMatrix{T},
+              X::AbstractMatrix{T}, Z::AbstractMatrix{T}, Rₙₖ::AbstractMatrix{T}; covreg::T=1e-6) where {T<:AbstractFloat}
     d, k = size(μₖ)
-    n = sum(πₖ)
     for j in 1:k
-        μ = view(μₖ,:,j)
-        μ ./= πₖ[j]
-        z = X .- μ
+        broadcast!(-, Z, X, @view μₖ[:,j])
         Σ = view(Σₖ, :, :, j)
-        Σ .= Rₙₖ[:,j]'.*z*z'/πₖ[j]
-        πₖ[j] /= n
+        Σ .= (Rₙₖ[:,j]'.*Z)*Z'/nₖ[j] .+ covreg
     end
     Σₖ
 end
@@ -168,33 +173,22 @@ function initialize(::Type{MV}, X::AbstractMatrix{T}, k::Int;
         error("Unimplemented initialization algorithm: $init")
     end
 
-    d, k = size(X,1), size(Rₙₖ,2)
-    πₖ = zeros(T, k)
+    d, n = size(X)
+    k = size(Rₙₖ,2)
+    nₖ = zeros(T, k)
     μₖ = zeros(T, d, k)
-    stats!(πₖ, μₖ, X, Rₙₖ)
+    stats!(nₖ, μₖ, X, Rₙₖ)
     Σₖ = zeros(T, d, d, k)
-    cov!(MV, πₖ, μₖ, Σₖ, X, Rₙₖ)
-    πₖ, μₖ, Σₖ, Rₙₖ
+    Z = similar(X)
+    cov!(MV, Σₖ, nₖ, μₖ, X, Z, Rₙₖ)
+    nₖ/n, μₖ, Σₖ, Rₙₖ
 end
 
-# function cov!(::Type{FullNormal}, πₖ::AbstractVector{T}, μₖ::AbstractMatrix{T}, Σₖ::AbstractArray{T,3},
-#               X::AbstractMatrix{T}, Rₙₖ::AbstractMatrix{T}) where {T<:AbstractFloat}
-#     fill!(Σₖ, zero(T))
-#     d, k = size(μₖ)
-#     for i in 1:size(X,2)
-#         x = view(X,:,i)
-#         xxᵀ = x*x'
-#         for j in 1:k
-#             view(Σₖ,:,:,j) .+= Rₙₖ[i,j]*xxᵀ
-#         end
-#     end
-#     for j in 1:k
-#         μⱼ = view(μₖ,:,j)
-#         Σⱼ = view(Σₖ,:,:,j)
-#         Σⱼ .-= μⱼ*μⱼ'/πₖ[j]
-#         Σⱼ ./= πₖ[j]
-#         μⱼ ./= πₖ[j]
-#         πₖ[j] /= n
-#     end
-#     πₖ, μₖ, Σₖ, Rₙₖ
-# end
+function repaircov!(Σ)
+    F = eigen(Σ)
+    V = F.values
+    # replace negative eigenvalues by zero
+    V .= max.(V, 0)
+    # reconstruct covariance matrix
+    Σ .= F.vectors * Diagonal(V) * F.vectors'
+end

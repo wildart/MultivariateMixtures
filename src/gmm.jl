@@ -1,16 +1,19 @@
-lower_bound(::Type{MV}, Rₙ, Rₙₖ) where {MV<:MultivariateNormal} = mean(log, Rₙₖ)
+lower_bound(::Type{MV}, Rₙ, Rₙₖ) where {MV<:MultivariateNormal} = mean(e->iszero(e) ? -708 : log(e), Rₙₖ)
+using Serialization
 
 "Gaussian Mixture Model"
 function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
-                tol::Real=floatmin(T),      # convergence tolerance
+                tol::Real=1e-5,             # convergence tolerance
                 maxiter::Integer=100,       # number of iterations
                 μs::Union{AbstractArray{T,2}, Nothing} = nothing,
                 Σs::Union{AbstractArray{T,3}, Nothing} = nothing,
-                homoscedastic=false,
-                init=:kmeans,
-                logprob=false
+                homoscedastic::Bool=false,
+                init::Symbol=:kmeans,
+                logprob::Bool=true,
+                covreg::Real=1e-6
             ) where {T<:AbstractFloat, MV<:MultivariateNormal}
 
+    MINLOG = log(floatmin(T))
     d, n = size(X)
     Z = similar(X)
     Rₙ = zeros(T, n)
@@ -30,19 +33,24 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
             # remove the mean from the data
             broadcast!(-, Z, X, @view μₖ[:,j])
             # prepare covaranace inverse
-            Σ = @view Σₖ[:,:,j]
+            # Σ = @view Σₖ[:,:,j]
+            Σ = Symmetric(Σₖ[:,:,j], :L)
             # calculate responsibilities
             if logprob
-                Σ⁻¹ = cholesky(Symmetric(Σ))
-                logpost!(view(Rₙₖ,:,j), πₖ[j], Σ⁻¹, Z)
+                Ch = cholesky!(Σ, check=false)
+                !issuccess(Ch) && println("$itr, $j, $(Ch.info)")
+                Ch.info<0 && error( "Cholesky factorization failed ($(Ch.info)). Try to decrease the number of components or increase `covreg`: $covreg.")
+                # logpost!(view(Rₙₖ,:,j), πₖ[j], Ch, Z)
+                # logpost!(view(Rₙₖ,:,j), πₖ[j], Symmetric(Σ), Z)
+                logpost!(view(Rₙₖ,:,j), πₖ[j], Ch.L, Z)
             else
-                Σ⁻¹ = inv(Symmetric(Σ))
-                posterior!(view(Rₙₖ,:,j), πₖ[j], Σ⁻¹, Z)
+                posterior!(view(Rₙₖ,:,j), πₖ[j], Symmetric(Σ), Z)
             end
         end
         # Calculate (log) responsibilities
         if logprob
             logreps!(Rₙ, Rₙₖ, Off)
+            # Rₙₖ[Rₙₖ .< 0] .= zero(T)
             # logreps!(Rₙ, Rₙₖ)
         else
             Rₙₖ[Rₙₖ .< eps(T)] .= eps(T)
@@ -52,7 +60,8 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
 
         # M Step: Calculate parameters
         stats!(πₖ, μₖ, X, Rₙₖ)
-        cov!(MV, πₖ, μₖ, Σₖ, X, Rₙₖ)
+        cov!(MV, Σₖ, πₖ, μₖ, X, Z, Rₙₖ, covreg=covreg)
+        πₖ ./= n
 
         if homoscedastic
             Σₖ[:,:,1] .*= πₖ[1]
@@ -79,9 +88,9 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
         ℒ′ = ℒ
     end
 
-    # if Δℒ > tol
-    #     @warn "No convergence" Δℒ=Δℒ tol=tol
-    # end
+    if Δℒ > tol
+        @warn "No convergence" Δℒ=Δℒ tol=tol
+    end
 
     return MixtureModel([distribution(MV, μₖ[:,j], Σₖ[:,:,j]) for j in 1:k], πₖ)
 end
