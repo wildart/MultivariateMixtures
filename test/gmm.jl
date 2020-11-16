@@ -8,7 +8,7 @@
     X = hcat([MultivariateMixtures.clusters(t, 250, d) for t in theta]...)
 
     G1 = fit_mle(MvNormal, X[:,1:250])
-    GMM = fit_mm(FullNormal, X, k, tol=1e-5)
+    GMM = fit_mm(FullNormal, X, k, tol=1e-10)
     @test Distributions.component_type(GMM) <: FullNormal
     @test ncomponents(GMM) == k
     @test probs(GMM) ≈ fill(1/4, k) atol=1e-2
@@ -21,13 +21,15 @@
     @test cov(GMM) ≈ cov(X, dims=2) atol=1e-1
 
     GMM = fit_mm(FullNormal, X, k, tol=1e-5, homoscedastic=true)
-    G3 = component(GMM,4)
+    G3 = component(GMM,1)
     @test mean(G1) ≈ mean(G3) atol=1e-2
     @test cov(G1) ≈ cov(G3) atol=0.5
     @test cov(G3) == cov(component(GMM,1))
 
     GMM = fit_mm(DiagNormal, X, k, tol=1e-4)
     @test Distributions.component_type(GMM) <: DiagNormal
+    @test ncomponents(GMM) == k
+    @test probs(GMM) ≈ fill(1/4, k) atol=1e-2
 
     GMM = fit_mm(IsoNormal, X, k, tol=1e-4)
     @test Distributions.component_type(GMM) <: IsoNormal
