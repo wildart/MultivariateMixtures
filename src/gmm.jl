@@ -21,6 +21,8 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
 
     # initialize parameters
     πₖ, μₖ, Σₖ, Rₙₖ = initialize(MV, X, k, init=init)
+    μs !== nothing && copyto!(μₖ, μs)
+    Σs !== nothing && copyto!(Σₖ, Σs)
     Tmpₙ, TmpC = auxiliary(MV, X, k)
 
     ℒ = ℒ′ₐ = ℒₐ = ℒ′′ = ℒ′ = Δℒ = typemin(T)
@@ -36,7 +38,7 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
             R = view(Rₙₖ,:,j)
             if logprob
                 F = factorize(MV, Σ)
-                # logpdf!(R, Hermitian(Σ), μ, X, Z)
+                # logpdf!(R, μ, X, Hermitian(Σ), Z)
                 logpdf!(R, X, μ, F, Z)
                 R .+= log(πₖ[j])
             else
@@ -96,5 +98,5 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
 end
 
 distribution(::Type{FullNormal}, μₖ, Σₖ, j) = MvNormal(μₖ[:,j], Symmetric(Σₖ[:,:,j]))
-distribution(::Type{DiagNormal}, μₖ, Σₖ, j) = MvNormal(μₖ[:,j], Diagonal(Σₖ[:,1,j]))
-distribution(::Type{IsoNormal}, μₖ, Σₖ, j) = MvNormal(μₖ[:,j], Σₖ[1,1,j])
+distribution(::Type{DiagNormal}, μₖ, Σₖ, j) = MvNormal(μₖ[:,j], Diagonal(sqrt.(Σₖ[:,1,j])))
+distribution(::Type{IsoNormal}, μₖ, Σₖ, j) = MvNormal(μₖ[:,j], sqrt(Σₖ[1,1,j]))
