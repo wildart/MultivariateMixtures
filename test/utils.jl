@@ -113,6 +113,6 @@ using MultivariateMixtures: colwise_dot!, logsumexp, logsumexp!, stats!, covaria
     @test F3 isa UniformScaling
     logpdf!(view(R,:,3), X, mu[:,3], F3)
     r = logpdf(MvNormal(mu[:,3], sqrt(C3[:,:,3][])), X)
-    @test sum(view(R,:,3) .- r) ≈ 0.0 atol=1e-10
+    @test sum(view(R,:,3) .- r) ≈ 0.0 atol=1e-8
 
 end
