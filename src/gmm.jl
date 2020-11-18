@@ -37,7 +37,7 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
             Σ = Σₖ[:,:,j]
             R = view(Rₙₖ,:,j)
             if logprob
-                F = factorize(MV, Σ)
+                F = precision(MV, Σ)
                 # logpdf!(R, μ, X, Hermitian(Σ), Z)
                 logpdf!(R, X, μ, F, Z)
                 R .+= log(πₖ[j])

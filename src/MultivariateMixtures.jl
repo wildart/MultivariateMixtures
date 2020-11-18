@@ -5,6 +5,7 @@ using Statistics: mean, var, cov, covm
 using StatsBase: fit, ConvergenceException
 using MultivariateStats: PPCA, FactorAnalysis, outdim
 using Distributions
+using Distributions: log2π
 using Clustering: kmeans, assignments
 
 import Base: show, length, convert

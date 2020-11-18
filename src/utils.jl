@@ -27,38 +27,40 @@ end
 function logpdf!(r, X::AbstractMatrix, μ::AbstractVector, L::LowerTriangular,
                  Z::AbstractMatrix=similar(X))
     broadcast!(-, Z, X, μ)
-    MultivariateMixtures.colwise_dot!(r, Z, L \ Z)
+    lmul!(L,Z)
+    sum!(r', Z.*Z)
+    r .+= size(X,1)*log2π - 2*logdet(L)
     r ./= -2
-    r .+= -(log(2π)*length(μ)+ logdet(L))/2
 end
 
 function logpdf!(r, X::AbstractMatrix{T}, μ::AbstractVector{T}, D::Diagonal{T},
-                 Z::AbstractMatrix{T}=zeros(T,1,1)) where {T<:AbstractFloat}
+                 Z::AbstractMatrix{T}=zeros(T,0,0)) where {T<:AbstractFloat}
     m, n = size(X)
     @inbounds @simd for j in 1:n
         s = zero(T)
         for i in 1:m
-            s += D[i,i] * abs2(X[i,j] - μ[i])
+            s += abs2(D[i,i] * (X[i,j] - μ[i]))
         end
         r[j] = s
     end
+    r .+= m*log2π - 2*logdet(D)
     r ./= -2
-    r .+= -(log(2π)*length(μ) + logdet(D))/2
 end
 
 function logpdf!(r, X::AbstractMatrix{T}, μ::AbstractVector{T}, D::UniformScaling{T},
-                 Z::AbstractMatrix{T}=zeros(T,1,1)) where {T<:AbstractFloat}
+                 Z::AbstractMatrix{T}=zeros(T,0,0)) where {T<:AbstractFloat}
     m, n = size(X)
-    logdetD = m*log(D[1,1])
+    J = D[1,1]
+    logdetD = -2m*log(J)
     @inbounds @simd for j in 1:n
         s = zero(T)
         for i in 1:m
-            s += abs2(X[i,j] - μ[i])
+            s += abs2(J*(X[i,j] - μ[i]))
         end
-        r[j] = D[1,1] *s
+        r[j] = s
     end
+    r .+= m*log2π + logdetD
     r ./= -2
-    r .+= -(log(2π)*length(μ) + logdetD)/2
 end
 
 function logpdf!(r, X::AbstractMatrix, μ::AbstractVector, Σ::Hermitian, Z=similar(X))
@@ -249,22 +251,22 @@ function initialize(::Type{MV}, X::AbstractMatrix{T}, k::Int;
     nₖ/n, μₖ, Σₖ, Rₙₖ
 end
 
-function factorize(::Type{FullNormal}, Σ::AbstractMatrix)
+function precision(::Type{FullNormal}, Σ::AbstractMatrix)
     Ch = cholesky!(Hermitian(Σ, :L), check=false)
     !issuccess(Ch) && @debug "Cholesky factorization failed" err=Ch.info
     if Ch.info<0
         error("Cholesky factorization failed ($(Ch.info)).\\
               Try to decrease the number of components or increase `covreg`: $covreg.")
     end
-    Ch.L
+    LinearAlgebra.inv!(Ch.L)
 end
 
-function factorize(::Type{DiagNormal}, Σ::AbstractMatrix)
+function precision(::Type{DiagNormal}, Σ::AbstractMatrix)
     any(iszero, Σ) && error("Factorization failed. Try to decrease the number of components")
     Diagonal(1 ./ sqrt.(vec(Σ)))
 end
 
-function factorize(::Type{IsoNormal}, Σ::AbstractMatrix)
+function precision(::Type{IsoNormal}, Σ::AbstractMatrix)
     any(iszero, Σ) && error("Factorization failed. Try to decrease the number of components")
     (1/sqrt(Σ[]))I
 end

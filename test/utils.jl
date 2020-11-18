@@ -47,6 +47,7 @@ using MultivariateMixtures: colwise_dot!, logsumexp, logsumexp!, stats!, covaria
     Cori = [5.0; 1.0; 0.05]
     R = vcat(repeat([1.0 0.0 0.0], s), repeat([0.0 1.0 0.0], s), repeat([0.0 0.0 1.0], s))
     X = vcat(Cori[1]*randn(s,d).+muori[:,1]', Cori[2]*randn(s,d).+muori[:,2]', Cori[3]*randn(s,d).+muori[:,3]')'
+
     nk, mu = zeros(k), zeros(d,k)
     stats!(nk, mu, X, R)
     @testset for i in nk
@@ -96,14 +97,22 @@ using MultivariateMixtures: colwise_dot!, logsumexp, logsumexp!, stats!, covaria
     @test size(A) == (n,)
     @test size(B) == (d,k)
 
-    F = MultivariateMixtures.factorize(FullNormal, C1[:,:,1])
-    @test F isa LowerTriangular
-    # logpdf!(view(R,:,1), X, mu[:,1], F)
-    F = MultivariateMixtures.factorize(DiagNormal, C2[:,:,1])
-    @test F isa Diagonal
-    # logpdf!(view(R,:,2), X, mu[:,2], F)
-    F = MultivariateMixtures.factorize(IsoNormal, C3[:,:,1])
-    @test F isa UniformScaling
-    # logpdf!(view(R,:,3), X, mu[:,3], F)
+    F1 = MultivariateMixtures.precision(FullNormal, C1[:,:,1])
+    @test F1 isa LowerTriangular
+    logpdf!(view(R,:,1), X, mu[:,1], F1)
+    r = logpdf(MvNormal(mu[:,1], C1[:,:,1]), X)
+    @test sum(view(R,:,1) .- r) ≈ 0.0 atol=1e-10
+
+    F2 = MultivariateMixtures.precision(DiagNormal, C2[:,:,2])
+    @test F2 isa Diagonal
+    logpdf!(view(R,:,2), X, mu[:,2], F2)
+    r = logpdf(MvNormal(mu[:,2], Diagonal(vec(C2[:,:,2]))), X)
+    @test sum(view(R,:,2) .- r) ≈ 0.0 atol=1e-10
+
+    F3 = MultivariateMixtures.precision(IsoNormal, C3[:,:,3])
+    @test F3 isa UniformScaling
+    logpdf!(view(R,:,3), X, mu[:,3], F3)
+    r = logpdf(MvNormal(mu[:,3], sqrt(C3[:,:,3][])), X)
+    @test sum(view(R,:,3) .- r) ≈ 0.0 atol=1e-10
 
 end
