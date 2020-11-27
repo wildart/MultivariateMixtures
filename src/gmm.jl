@@ -58,7 +58,7 @@ function fit_mm(::Type{MV}, X::AbstractMatrix{T}, k::Int;
         # Calculate lower bound value on the complete log-likelihood
         ℒ′′ = ℒ′
         ℒ′ = ℒ
-        ℒ = lower_bound(MV, (logprob ? Rₙ : caplog.(Rₙ)), Rₙₖ)
+        ℒ = lower_bound(MV, (logprob ? Rₙ : cliplog.(Rₙ)), Rₙₖ)
 
         # M Step: Calculate parameters
         stats!(πₖ, μₖ, X, Rₙₖ)

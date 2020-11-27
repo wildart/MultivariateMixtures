@@ -29,7 +29,7 @@ function logpdf!(r, X::AbstractMatrix, μ::AbstractVector, L::LowerTriangular,
     broadcast!(-, Z, X, μ)
     lmul!(L,Z)
     sum!(r', Z.*Z)
-    r .+= size(X,1)*log2π - 2*logdet(L)
+    r .+= size(X,1)*log2π - 2*cliplogdet(L)
     r ./= -2
 end
 
@@ -43,7 +43,7 @@ function logpdf!(r, X::AbstractMatrix{T}, μ::AbstractVector{T}, D::Diagonal{T},
         end
         r[j] = s
     end
-    r .+= m*log2π - 2*logdet(D)
+    r .+= m*log2π - 2*cliplogdet(D)
     r ./= -2
 end
 
@@ -65,7 +65,7 @@ end
 
 function logpdf!(r, X::AbstractMatrix, μ::AbstractVector, Σ::Hermitian, Z=similar(X))
     broadcast!(-, Z, X, μ)
-    MultivariateMixtures.colwise_dot!(r, Z, inv(Σ) * Z)
+    colwise_dot!(r, Z, Σ \ Z)
     r ./= -2
     r .+= -(log(2π)*length(μ) + logdet(Σ))/2
 end
@@ -184,7 +184,8 @@ function covariances!(Σₖ::AbstractArray{T,3}, nₖ::AbstractVector{T}, μₖ:
     for j in 1:k
         broadcast!(-, aux, X, @view μₖ[:,j])
         Σ = view(Σₖ, :, :, j)
-        Σ .= (Rₙₖ[:,j]'.*aux)*aux'/nₖ[j] .+ covreg
+        Σ .= (Rₙₖ[:,j]'.*aux)*aux'/nₖ[j]
+        Σ[1:(d+1):end] .+= covreg
     end
     Σₖ
 end
@@ -253,7 +254,7 @@ end
 
 function precision(::Type{FullNormal}, Σ::AbstractMatrix)
     Ch = cholesky!(Hermitian(Σ, :L), check=false)
-    !issuccess(Ch) && @debug "Cholesky factorization failed" err=Ch.info
+    !issuccess(Ch) && @debug "Cholesky factorization failed" err=Ch.info Σ
     if Ch.info<0
         error("Cholesky factorization failed ($(Ch.info)).\\
               Try to decrease the number of components or increase `covreg`: $covreg.")
@@ -280,4 +281,5 @@ function repaircov!(Σ)
     Σ .= F.vectors * Diagonal(V) * F.vectors'
 end
 
-caplog(e::T) where {T<:AbstractFloat} = log(ifelse(e>0, e, floatmin(T)))
+cliplog(e::T) where {T<:AbstractFloat} = ifelse(abs(e)>eps(T), e, eps(T)) |> log
+cliplogdet(X::AbstractMatrix) = sum(cliplog, diag(X))
